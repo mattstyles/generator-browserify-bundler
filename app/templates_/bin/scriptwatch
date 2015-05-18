@@ -1,0 +1,47 @@
+#!/usr/bin/env node
+
+var fs = require( 'fs' )
+var path = require( 'path' )
+var spawn = require( 'child_process' ).spawn
+
+var chokidar = require( 'chokidar' )
+var argv = require( 'minimist' )( process.argv.slice( 2 ) )
+var chalk = require( 'chalk' )
+
+
+
+function log() {
+    if ( argv[ 'suppress-output' ] ) {
+        return
+    }
+
+    process.stdout.write( chalk.grey( '  [scriptwatch] ' ) )
+    console.log.apply( console, arguments )
+}
+
+function compile() {
+    var child = spawn( 'npm', [ 'run', 'build:scripts' ], {
+        stdio: [ 0, 1 ]
+    } )
+    // child.stdout.on( 'data', function( data ) {
+    //     console.log( data.toString() )
+    // })
+}
+
+compile()
+
+var watcher = chokidar.watch( argv._ )
+    .on( 'change', function( filepath ) {
+        log( chalk.yellow( 'change' ), filepath )
+        compile()
+    })
+    .on( 'ready', function() {
+        var filepath = ''
+        // List watched files
+        Object.keys( watcher._watched ).forEach( function( key ) {
+            Object.keys( watcher._watched[ key ]._items ).forEach( function( item ) {
+                filepath = path.join( key, item )
+                log( chalk.cyan( 'watch' ), filepath.replace( process.env.PWD + '/', '' ) )
+            })
+        })
+    })

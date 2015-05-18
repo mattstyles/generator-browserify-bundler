@@ -1,0 +1,6 @@
+
+<p>BundleB in page</p>
+
+
+<script src="/common.js"></script>
+<script src="/bundleB.js"></script>

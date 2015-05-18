@@ -1,0 +1,218 @@
+#!/usr/bin/env node
+
+/**
+ * _ _required_ root bundle directory
+ * -o --output _required_ output directory
+ * -d --debug _?_ adds debug mode to browserify
+ * --verbose _?_ outputs more logging and throws errors
+ * --skip _?_ passed to browserify.noParse
+ * -r --remap _?_ remaps require calls
+ * -t _?_ adds transforms to the pipeline, order is important
+ */
+// @example
+// bundler ./src/bundles -o ./dist -t flowcheck -t babelify
+// bundler ./src/bundles -d --skip react --remap react:react/dist.react -t babelify -o ./dist
+
+
+var fs = require( 'fs' )
+var path = require( 'path' )
+var util = require( 'util' )
+var EventEmitter = require( 'events' )
+
+var argv = require( 'minimist' )( process.argv.slice( 2 ) )
+var chalk = require( 'chalk' )
+var glob = require( 'glob' )
+var hrtime = require( 'pretty-hrtime' )
+
+var browserify = require( 'browserify' )
+var factor = require( 'factor-bundle' )
+var concat = require( 'concat-stream' )
+var uglify = require( 'uglifyjs' )
+
+var Writer = require( './bundle/writer' )
+var writer = new Writer({
+    argv: argv
+})
+
+
+/**
+ * CLI options/flags required errors
+ */
+if ( !argv._ ) {
+    throw new Error( 'Bundle input directory required e.g. bundler ./src/bundles' )
+}
+if ( !argv.o ) {
+    throw new Error( 'Output directory required e.g. bundler ./bundle/directory -o ./output' )
+}
+
+
+/**
+ * CLI
+ */
+var root = path.resolve( argv._[ 0 ] )
+var events = new EventEmitter()
+
+
+/**
+ * Create a bundle name from the filepath
+ * @example
+ * src/bundles/mixes/main.js > mixes
+ */
+function bundleName( filepath ) {
+    return path.dirname( path.relative( root, filepath ) )
+}
+
+/**
+ * Returns a writable stream, with uglify if not in debug
+ */
+var sources = 0
+function output( bundledName ) {
+    var outPath = path.join( argv.o || argv.output, bundledName + '.js' )
+    return concat( function writable( body ) {
+        sources++
+        var startTime = process.hrtime()
+
+        if ( !argv.d ) {
+            console.log( chalk.grey( '  [bundler]' ), 'Uglifying:', chalk.yellow( bundledName ) )
+            body = uglify.minify( body.toString(), {
+                fromString: true
+            }).code
+        } else {
+            console.log( chalk.grey( '  [bundler]' ), 'Writing:', chalk.yellow( bundledName ) )
+        }
+
+        fs.writeFile( outPath, body, { encoding: 'utf8' }, function onWriteComplete( err ) {
+            if ( err ) {
+                console.log( chalk.red( 'Error: writing' ) )
+                throw new Error( err )
+            }
+
+            if ( argv.verbose ) {
+                console.log(
+                    chalk.grey( '  [bundler]' ),
+                    chalk.blue( '-' ),
+                    'Write complete:',
+                    chalk.yellow( bundledName ),
+                    chalk.magenta( hrtime( process.hrtime( startTime ) ) )
+                )
+            }
+
+            sources--
+
+            if ( sources === 0 ) {
+                events.emit( 'write:finish' )
+            }
+        })
+    })
+}
+
+
+/**
+ * Look for bundles
+ * Entry points are specified as folders underneath `root` containing a `main.js*` file
+ */
+glob( path.join( root, '*/main.js*' ), function( err, files ) {
+    if ( err ) {
+        console.log( chalk.red( 'Error: bundling' ) )
+        throw new Error( err )
+    }
+
+    // Create bundler
+    console.log( chalk.grey( '  [bundler]' ), 'Prepping pipeline...' )
+    var startTime = process.hrtime()
+    var bundler = browserify({
+        entries: files.map( function( filepath ) {
+            return path.resolve( filepath )
+        }),
+        debug: argv.d || argv.debug || false,
+        paths: [
+            './node_modules',
+            './src'
+        ],
+        noParse: argv.skip || [],
+        extensions: [
+            '.js',
+            '.jsx'
+        ]
+    })
+        .on( 'file', function( file, id, parent ) {
+            // Output entry files
+            if ( file === id ) {
+                console.log( chalk.grey( '  [bundler]' ), 'Generating bundle:', chalk.yellow( bundleName( id ) ) )
+                return
+            }
+
+            if ( !argv.verbose ) {
+                return
+            }
+
+            console.log( chalk.grey( '  [bundler]' ), chalk.blue( '-' ), path.relative( './', file ) )
+        })
+        .on( 'bundle', function( bundle ) {
+            console.log( chalk.grey( '  [bundler]' ), 'Generating:', chalk.yellow( 'common' ) )
+        })
+        .plugin( factor, {
+            // o: files.map( bundleName ).map( output )
+            o: files.map( bundleName ).map( writer.stream )
+        })
+
+
+    // Add transforms
+    if ( argv.t ) {
+        if ( !util.isArray( argv.t ) ) {
+            argv.t = [ argv.t ]
+        }
+
+        argv.t.forEach( function( transform ) {
+            console.log( chalk.grey( '  [bundler]' ), 'Adding transform:', chalk.cyan( transform ) )
+            bundler.transform( transform )
+        })
+    }
+
+    // Remap requires
+    if ( argv.remap ) {
+        if ( !util.isArray( argv.remap ) ) {
+            argv.remap = [ argv.remap ]
+        }
+
+        bundler.transform( 'aliasify', {
+            aliases: argv.remap.reduce( function remap( aliases, mapping ) {
+                console.log( chalk.grey( '  [bundler]' ), 'Adding mapping:', chalk.blue( mapping ) )
+                var maps = mapping.split( /:|=/ )
+                aliases[ maps.shift() ] = maps.shift()
+                return aliases
+            }, {} )
+        })
+    }
+
+    // All systems go
+    console.log( chalk.grey( '  [bundler]' ), 'Generating...' )
+    bundler.bundle()
+        .on( 'error', function( bundleErr ) {
+            console.log( chalk.grey( '  [bundler]' ), chalk.red( 'error X' ) )
+            console.log( chalk.grey( '  [bundler]' ), chalk.red( bundleErr.message ) )
+
+            if ( argv.verbose ) {
+                throw new Error( bundleErr )
+            }
+        })
+        .pipe( writer.stream( 'common' ) )
+
+
+    /**
+     * Add listener for when all the file writes are complete
+     */
+    writer.on( 'write:finish', function() {
+            console.log( chalk.grey( '  [bundler]' ), chalk.green( 'OK' ) )
+
+            if ( argv.verbose ) {
+                console.log(
+                    chalk.grey( '  [bundler]' ),
+                    chalk.blue( '-' ),
+                    'Compile time:',
+                    chalk.magenta( hrtime( process.hrtime( startTime ) ) )
+                )
+            }
+        })
+
+})

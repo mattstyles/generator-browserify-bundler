@@ -1,0 +1,64 @@
+#!/usr/bin/env node
+
+/**
+ * ./bin/tmpl src/views/*.hjs -d package.json -o ./dist -- -v src/bundles/**\/*.hjs
+ */
+
+var fs = require( 'fs' )
+var path = require( 'path' )
+var mkdirp = require( 'mkdirp' )
+
+var hogan = require( 'hogan.js' )
+var argv = require( 'minimist' )( process.argv.slice( 2 ) )
+var chalk = require( 'chalk' )
+
+
+// Split args by additional args for partials to account for globbing
+var layouts = []
+var partials = []
+var out = layouts
+
+argv._.forEach( function( arg ) {
+    if ( arg === '-v' ) {
+        out = partials
+        return
+    }
+
+    out.push( arg )
+})
+
+
+function log() {
+    if ( argv[ 'suppress-output' ] ) {
+        return
+    }
+
+    process.stdout.write( chalk.grey( '  [templating] ' ) )
+    console.log.apply( console, arguments )
+}
+
+var context = JSON.parse( fs.readFileSync( path.resolve( argv.d ) ) )
+
+// Punt each partial through each view layout
+// For each layout perform output per partial
+layouts.forEach( function( layout ) {
+    log( 'layout', chalk.cyan( layout ) )
+    var tmplLayout = hogan.compile( fs.readFileSync( path.resolve( layout ), { encoding: 'utf8' } ) )
+    var layoutPath = path.basename( layout, '.hjs' ) === 'base'
+        ? '/'
+        : path.basename( layout, '.hjs' )
+    mkdirp.sync( path.join( argv.o, layoutPath ) )
+
+    // Compile with each body template partial
+    partials.forEach( function( partial ) {
+        log( '  view', chalk.yellow( partial ) )
+        var tmpl = tmplLayout.render( context, {
+            body: fs.readFileSync( path.resolve( partial ), { encoding: 'utf8' } )
+        })
+
+        var outpath = path.join( argv.o, layoutPath, path.basename( partial, '.hjs' ) + '.html' )
+        log( '  writing', chalk.green( outpath ) )
+
+        fs.writeFileSync( outpath, tmpl )
+    })
+})

@@ -1,0 +1,5 @@
+
+<p>Check the console</p>
+
+<script src="/common.js"></script>
+<script src="/bundleA.js"></script>
