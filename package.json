@@ -1,6 +1,6 @@
 {
   "name": "generator-browserify-bundler",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Yeoman generator to build a project with several bundles and a common core",
   "scripts": {
     "prepublish": "npm run build",
