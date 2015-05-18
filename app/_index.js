@@ -7,7 +7,7 @@ import yosay from 'yosay'
 import osenv from 'osenv'
 import glob from 'glob'
 
-export default class UrbanGenerator extends Base {
+export default class BundlerGenerator extends Base {
     constructor( ...args ) {
         super( ...args )
 
@@ -47,12 +47,14 @@ export default class UrbanGenerator extends Base {
 
     hello() {
         this.log( yosay([
-            chalk.cyan( 'Generator es2015' ),
+            chalk.cyan( 'Generator Bundler' ),
             'Feed me information...'
         ].join( '\n' )))
     }
 
     prompting() {
+        let done = this.async()
+
         if ( this.options[ 'skip-prompt' ] ) {
             this.log( 'Skipping prompt' )
             this.props = {
@@ -61,11 +63,12 @@ export default class UrbanGenerator extends Base {
                 authorName: 'Arthur Debug',
                 userName: 'adebug'
             }
-            return
+            return done()
         }
 
-        this.prompt( UrbanGenerator.prompts, props => {
+        this.prompt( BundlerGenerator.prompts, props => {
             this.props = props
+            done()
         })
     }
 
@@ -74,7 +77,7 @@ export default class UrbanGenerator extends Base {
 
         this.log( 'Copying templates' )
 
-        glob( path.join( this.sourceRoot(), '*' ), {
+        glob( path.join( this.sourceRoot(), '**/*' ), {
             dot: true
         }, ( err, files ) => {
             if ( err ) {
@@ -88,12 +91,7 @@ export default class UrbanGenerator extends Base {
                     this.fs.copyTpl(
                         this.templatePath( file ),
                         this.destinationPath( file ),
-                        this.props,
-                        {
-                            evaluate: /\{\{\{(.+?)\}\}\}/g,
-                            interpolate: /\{\{(.+?)\}\}/g,
-                            escape: /\{\{-(.+?)\}\}/g
-                        }
+                        this.props
                     )
                 })
 
